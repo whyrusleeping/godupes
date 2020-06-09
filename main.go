@@ -19,9 +19,13 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
+	"runtime"
+	"sync"
 	"syscall"
+	"time"
 	"unsafe"
 
 	cli "github.com/urfave/cli/v2"
@@ -94,6 +98,7 @@ var findDupesCmd = &cli.Command{
 	Action: func(cctx *cli.Context) error {
 		var filelist []string
 
+		walkStart := time.Now()
 		root := cctx.Args().First()
 		// TODO: walk isnt super efficient, and doesnt let us do anything in parallel
 		err := filepath.Walk(root, func(p string, info os.FileInfo, err error) error {
@@ -108,21 +113,45 @@ var findDupesCmd = &cli.Command{
 		if err != nil {
 			return err
 		}
+		log.Printf("Enumerating files took %s", time.Since(walkStart))
 
 		// TODO: caching the entire list of files on disk might be useful. On
 		// large systems this takes a long time to generate
 
 		lookup := make(map[string][]string)
+		var lookupLk sync.Mutex
+		var wait sync.WaitGroup
 
-		for _, f := range filelist {
-			hkey, err := hashFile(f)
-			if err != nil {
-				return fmt.Errorf("failed to hash file %q: %w", f, err)
-			}
+		jobs := make(chan string)
 
-			hks := string(hkey)
-			lookup[hks] = append(lookup[hks], f)
+		for i := 0; i < runtime.NumCPU(); i++ {
+			go func() {
+				for f := range jobs {
+					hkey, err := hashFile(f)
+					if err != nil {
+						log.Printf("failed to hash file %q: %s", f, err)
+					}
+
+					hks := string(hkey)
+					lookupLk.Lock()
+					lookup[hks] = append(lookup[hks], f)
+					lookupLk.Unlock()
+					wait.Done()
+				}
+
+			}()
 		}
+
+		hashStart := time.Now()
+		for _, f := range filelist {
+			wait.Add(1)
+			jobs <- f
+		}
+		close(jobs)
+
+		wait.Wait()
+
+		log.Printf("Hashing data took %s", time.Since(hashStart))
 
 		for _, matches := range lookup {
 			if len(matches) > 1 {
