@@ -158,7 +158,7 @@ func hashFile(f string) ([]byte, error) {
 }
 
 func DedupeFiles(fis []string) error {
-	f1, err := os.Open(os.Args[1])
+	f1, err := os.Open(fis[0])
 	if err != nil {
 		return err
 	}
@@ -169,15 +169,15 @@ func DedupeFiles(fis []string) error {
 		return err
 	}
 
-	size := unsafe.Sizeof(C.struct_btrfs_ioctl_same_args{})
-	size += unsafe.Sizeof(C.struct_btrfs_ioctl_same_extent_info{}) * 1
+	size := C.sizeof_struct_btrfs_ioctl_same_args
+	size += C.sizeof_struct_btrfs_ioctl_same_extent_info * (len(fis) - 1)
 	arg := (*C.struct_btrfs_ioctl_same_args)(C.malloc(C.ulong(size)))
 
 	arg.length = C.ulonglong(f1s.Size())
 	arg.dest_count = C.ushort(len(fis) - 1)
 
 	for i := 0; i < len(fis)-1; i++ {
-		destfi, err := os.Open(os.Args[2])
+		destfi, err := os.Open(fis[i+1])
 		if err != nil {
 			return err
 		}
