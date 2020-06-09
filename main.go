@@ -1,5 +1,6 @@
 package main
 
+// #include <stdlib.h>
 // #include <btrfs/ioctl.h>
 // void same_arg_set_extent_info(struct btrfs_ioctl_same_args* arg, int i, int fd, int offset) {
 //   struct btrfs_ioctl_same_extent_info *info = &arg->info[i];
@@ -172,6 +173,7 @@ func DedupeFiles(fis []string) error {
 	size := C.sizeof_struct_btrfs_ioctl_same_args
 	size += C.sizeof_struct_btrfs_ioctl_same_extent_info * (len(fis) - 1)
 	arg := (*C.struct_btrfs_ioctl_same_args)(C.malloc(C.ulong(size)))
+	defer C.free(unsafe.Pointer(arg))
 
 	arg.length = C.ulonglong(f1s.Size())
 	arg.dest_count = C.ushort(len(fis) - 1)
