@@ -1,16 +1,14 @@
 package main
 
 // #include <stdlib.h>
-// #include <btrfs/ioctl.h>
-// void same_arg_set_extent_info(struct btrfs_ioctl_same_args* arg, int i, int fd, int offset) {
-//   struct btrfs_ioctl_same_extent_info *info = &arg->info[i];
-//   info->fd = fd;
-//   info->logical_offset = offset;
+// #include <linux/fs.h>
+// void file_dedupe_set_info(struct file_dedupe_range* arg, int i,
+//     struct file_dedupe_range_info *info) {
+//   arg->info[i] = *info;
 // }
-// void same_arg_get_extent_info(struct btrfs_ioctl_same_args* arg, int i, int *bytes_deduped, int *status) {
-//   struct btrfs_ioctl_same_extent_info *info = &arg->info[i];
-//   *bytes_deduped = info->bytes_deduped;
-//   *status = info->status;
+// void file_dedupe_get_info(struct file_dedupe_range* arg, int i,
+//     struct file_dedupe_range_info *info) {
+//   *info = arg->info[i];
 // }
 import "C"
 
@@ -199,12 +197,13 @@ func DedupeFiles(fis []string) error {
 		return err
 	}
 
-	size := C.sizeof_struct_btrfs_ioctl_same_args
-	size += C.sizeof_struct_btrfs_ioctl_same_extent_info * (len(fis) - 1)
-	arg := (*C.struct_btrfs_ioctl_same_args)(C.malloc(C.ulong(size)))
+	size := C.sizeof_struct_file_dedupe_range
+	size += C.sizeof_struct_file_dedupe_range_info * (len(fis) - 1)
+	arg := (*C.struct_file_dedupe_range)(C.malloc(C.ulong(size)))
 	defer C.free(unsafe.Pointer(arg))
 
-	arg.length = C.ulonglong(f1s.Size())
+	arg.src_length = C.ulonglong(f1s.Size())
+	arg.src_offset = 0
 	arg.dest_count = C.ushort(len(fis) - 1)
 
 	for i := 0; i < len(fis)-1; i++ {
@@ -214,19 +213,22 @@ func DedupeFiles(fis []string) error {
 		}
 		defer destfi.Close()
 
-		C.same_arg_set_extent_info(arg, C.int(i), C.int(destfi.Fd()), 0)
+		var info C.struct_file_dedupe_range_info
+		info.dest_fd = C.longlong(destfi.Fd())
+		info.dest_offset = 0
+		C.file_dedupe_set_info(arg, C.int(i), &info)
 	}
 
-	r1, r2, errno := syscall.Syscall(syscall.SYS_IOCTL, f1.Fd(), C.BTRFS_IOC_FILE_EXTENT_SAME, uintptr(unsafe.Pointer(arg)))
-	fmt.Println("syscall ret: ", r1, int(r2), errno)
+	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, f1.Fd(), C.FIDEDUPERANGE, uintptr(unsafe.Pointer(arg)))
+	if errno != 0 {
+		return errno
+	}
+
 	for i := 0; i < int(arg.dest_count); i++ {
-		var (
-			status       C.int
-			bytesDeduped C.int
-		)
-		C.same_arg_get_extent_info(arg, C.int(i), &bytesDeduped, &status)
-		fmt.Println("resp status: ", status)
-		fmt.Println("resp deduped: ", bytesDeduped)
+		var info C.struct_file_dedupe_range_info
+		C.file_dedupe_get_info(arg, C.int(i), &info)
+		fmt.Println("resp status: ", info.status)
+		fmt.Println("resp deduped: ", info.bytes_deduped)
 	}
 	return nil
 }
