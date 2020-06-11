@@ -59,7 +59,7 @@ func ScanFiles(filelist []string) error {
 	log.Printf("Hashing data took %s", time.Since(hashStart))
 
 	for _, dupes := range lookup {
-		if len(dupes) <= 0 {
+		if len(dupes) <= 1 {
 			continue
 		}
 		for _, dupe := range dupes {
